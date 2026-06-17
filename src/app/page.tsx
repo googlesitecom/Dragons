@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import dynamic from 'next/dynamic'
 
 const DragonGame = dynamic(() => import('@/components/game/DragonGame'), {
@@ -16,6 +17,29 @@ const DragonGame = dynamic(() => import('@/components/game/DragonGame'), {
   ),
 })
 
+function HydrationErrorHandler({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    // Suppress recoverable hydration errors caused by browser extensions
+    // (e.g. Securly injecting <div id="securlyOverlay"> before React hydrates)
+    const handler = (event: ErrorEvent) => {
+      const msg = event.message || ''
+      if (msg.includes('Hydration') || msg.includes('securly') || msg.includes('hydrat')) {
+        event.preventDefault()
+        event.stopPropagation()
+        return false
+      }
+    }
+    window.addEventListener('error', handler, true)
+    return () => window.removeEventListener('error', handler, true)
+  }, [])
+
+  return <>{children}</>
+}
+
 export default function Home() {
-  return <DragonGame />
+  return (
+    <HydrationErrorHandler>
+      <DragonGame />
+    </HydrationErrorHandler>
+  )
 }

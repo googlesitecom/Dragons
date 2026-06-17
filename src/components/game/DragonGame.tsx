@@ -84,9 +84,19 @@ export default function DragonGame() {
   // Ensure client-only rendering to prevent hydration mismatch
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    // Use flushSync alternative: defer to next tick
+    // Suppress hydration errors caused by browser extensions (e.g., Securly)
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      const msg = args.map(a => typeof a === 'string' ? a : '').join(' ');
+      if (msg.includes('Hydration') || msg.includes('securly') || msg.includes('hydrat')) return;
+      origError.apply(console, args);
+    };
+    // Defer mount to ensure client DOM is ready
     const id = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(id);
+    return () => {
+      console.error = origError;
+      cancelAnimationFrame(id);
+    };
   }, []);
   const [gameState, setGameState] = useState<'menu' | 'playing' | 'paused' | 'gameover' | 'victory'>('menu');
   const [stats, setStats] = useState<SurvivalStats>({
