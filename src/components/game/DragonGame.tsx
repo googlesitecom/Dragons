@@ -81,6 +81,13 @@ const WATER_LEVEL = 2;
 
 export default function DragonGame() {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Ensure client-only rendering to prevent hydration mismatch
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // Use flushSync alternative: defer to next tick
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   const [gameState, setGameState] = useState<'menu' | 'playing' | 'paused' | 'gameover' | 'victory'>('menu');
   const [stats, setStats] = useState<SurvivalStats>({
     health: 100, maxHealth: 100,
@@ -1734,6 +1741,17 @@ export default function DragonGame() {
   // ============================================================
   // RENDER UI
   // ============================================================
+  if (!mounted) {
+    return (
+      <div className="w-full h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-amber-500 mb-4">DRAGON&apos;S REIGN</h1>
+          <p className="text-amber-200/60 animate-pulse">Loading the kingdom...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-screen relative overflow-hidden bg-black" ref={containerRef}>
       {/* ---- MENU SCREEN ---- */}
