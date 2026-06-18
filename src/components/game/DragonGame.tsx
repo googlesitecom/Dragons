@@ -14,6 +14,8 @@ import {
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private gain: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private musicPlaying = false;
 
   init() {
     if (this.ctx) return;
@@ -21,37 +23,82 @@ class SoundEngine {
     this.gain = this.ctx.createGain();
     this.gain.gain.value = 0.3;
     this.gain.connect(this.ctx.destination);
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = 0.08;
+    this.musicGain.connect(this.ctx.destination);
   }
 
   private playTone(freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.3) {
     if (!this.ctx || !this.gain) return;
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
+    osc.type = type; osc.frequency.value = freq;
     g.gain.setValueAtTime(volume, this.ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
-    osc.connect(g);
-    g.connect(this.gain);
-    osc.start();
-    osc.stop(this.ctx.currentTime + duration);
+    osc.connect(g); g.connect(this.gain); osc.start(); osc.stop(this.ctx.currentTime + duration);
   }
 
   private playNoise(duration: number, volume = 0.2) {
     if (!this.ctx || !this.gain) return;
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
-    const src = this.ctx.createBufferSource();
-    const g = this.ctx.createGain();
-    src.buffer = buffer;
-    g.gain.setValueAtTime(volume, this.ctx.currentTime);
+    const bs = this.ctx.sampleRate * duration;
+    const buf = this.ctx.createBuffer(1, bs, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bs; i++) d[i] = (Math.random() * 2 - 1) * 0.5;
+    const src = this.ctx.createBufferSource(); const g = this.ctx.createGain();
+    src.buffer = buf; g.gain.setValueAtTime(volume, this.ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
-    src.connect(g);
-    g.connect(this.gain);
-    src.start();
+    src.connect(g); g.connect(this.gain); src.start();
   }
+
+  // Background music - epic ambient loop using Web Audio
+  startMusic() {
+    if (this.musicPlaying || !this.ctx || !this.musicGain) return;
+    this.musicPlaying = true;
+    const playLoop = () => {
+      if (!this.musicPlaying || !this.ctx || !this.musicGain) return;
+      const now = this.ctx.currentTime;
+      // Deep drone pad
+      const notes = [55, 82.41, 110, 65.41, 73.42]; // A1, E2, A2, C2, D2
+      notes.forEach((freq, i) => {
+        const osc = this.ctx!.createOscillator();
+        const g = this.ctx!.createGain();
+        const filter = this.ctx!.createBiquadFilter();
+        osc.type = i < 2 ? 'sawtooth' : 'sine';
+        osc.frequency.value = freq;
+        // Slow LFO for movement
+        const lfo = this.ctx!.createOscillator();
+        const lfoGain = this.ctx!.createGain();
+        lfo.frequency.value = 0.1 + i * 0.05;
+        lfoGain.gain.value = freq * 0.02;
+        lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+        lfo.start(now); lfo.stop(now + 16);
+        filter.type = 'lowpass'; filter.frequency.value = 400 + i * 100; filter.Q.value = 1;
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(0.15 - i * 0.02, now + 3);
+        g.gain.linearRampToValueAtTime(0.12 - i * 0.02, now + 12);
+        g.gain.linearRampToValueAtTime(0, now + 16);
+        osc.connect(filter); filter.connect(g); g.connect(this.musicGain!);
+        osc.start(now); osc.stop(now + 16);
+      });
+      // Ethereal high melody
+      const melody = [440, 523.25, 659.25, 587.33, 523.25, 440, 392, 440];
+      melody.forEach((freq, i) => {
+        const osc = this.ctx!.createOscillator();
+        const g = this.ctx!.createGain();
+        osc.type = 'sine'; osc.frequency.value = freq;
+        const t = now + i * 2;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.06, t + 0.5);
+        g.gain.linearRampToValueAtTime(0, t + 1.8);
+        osc.connect(g); g.connect(this.musicGain!);
+        osc.start(t); osc.stop(t + 2);
+      });
+      setTimeout(() => playLoop(), 15000);
+    };
+    playLoop();
+  }
+
+  stopMusic() { this.musicPlaying = false; }
 
   fireBreath() { this.playNoise(0.4, 0.25); this.playTone(120, 0.3, 'sawtooth', 0.15); }
   roar() { this.playTone(60, 0.8, 'sawtooth', 0.4); this.playTone(80, 0.6, 'square', 0.2); }
@@ -59,10 +106,11 @@ class SoundEngine {
   kill() { this.playTone(400, 0.1, 'square', 0.3); this.playTone(600, 0.15, 'sine', 0.2); this.playTone(800, 0.2, 'sine', 0.15); }
   dive() { this.playNoise(0.6, 0.3); this.playTone(100, 0.5, 'sawtooth', 0.1); }
   impact() { this.playNoise(0.5, 0.4); this.playTone(50, 0.4, 'sawtooth', 0.3); this.playTone(80, 0.3, 'square', 0.2); }
+  shipExplosion() { this.playNoise(1.0, 0.5); this.playTone(40, 0.8, 'sawtooth', 0.4); this.playTone(60, 0.6, 'square', 0.3); this.playTone(200, 0.4, 'sine', 0.2); }
   levelUp() { [400, 500, 600, 800].forEach((f, i) => setTimeout(() => this.playTone(f, 0.3, 'sine', 0.3), i * 100)); }
   arrowHit() { this.playNoise(0.08, 0.1); this.playTone(300, 0.08, 'square', 0.1); }
-  wingFlap() { this.playNoise(0.15, 0.05); }
   ambientOcean() { this.playNoise(2, 0.03); this.playTone(60, 2, 'sine', 0.02); }
+  cinematicBoom() { this.playNoise(1.5, 0.6); this.playTone(30, 1.2, 'sawtooth', 0.5); this.playTone(50, 1.0, 'square', 0.3); }
 }
 
 const sound = new SoundEngine();
@@ -106,6 +154,8 @@ export default function DragonGame() {
     fireLight: THREE.PointLight; dragonModel: THREE.Group | null; mixer: THREE.AnimationMixer | null;
     camShake: number; killStreak: number; comboT: number; bloom: BloomEffect | null;
     water: THREE.Mesh; islands: THREE.Group[]; ambientT: number;
+    slowMo: number; cinematicMode: boolean; cinematicTimer: number; cinematicTarget: THREE.Vector3 | null;
+    baseScale: number;
   } | null>(null);
 
   const notify = useCallback((m: string) => { setNotification(m); if (G.current) G.current.notifT = 3; }, []);
@@ -128,8 +178,12 @@ export default function DragonGame() {
     // Ocean
     const waterGeo = new THREE.PlaneGeometry(4000, 4000, 128, 128);
     waterGeo.rotateX(-Math.PI / 2);
-    const waterMat = new THREE.MeshStandardMaterial({
-      color: 0x0a3d6b, roughness: 0.1, metalness: 0.5, transparent: true, opacity: 0.9,
+    const waterMat = new THREE.MeshPhysicalMaterial({
+      color: 0x0a4a7a, roughness: 0.05, metalness: 0.2,
+      transparent: true, opacity: 0.85,
+      transmission: 0.3, thickness: 2.0,
+      envMapIntensity: 1.0,
+      clearcoat: 1.0, clearcoatRoughness: 0.1,
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.position.y = WATER_Y;
@@ -518,7 +572,14 @@ export default function DragonGame() {
 
   const loop = useCallback(() => {
     const g = G.current; if (!g || !g.active) return;
-    const dt = Math.min(g.clock.getDelta(), 0.05);
+    let dt = Math.min(g.clock.getDelta(), 0.05);
+
+    // Slow-mo for cinematic
+    if (g.slowMo > 0) { g.slowMo -= dt; dt *= 0.2; } // 5x slower
+    if (g.cinematicMode) {
+      g.cinematicTimer -= g.clock.elapsedTime > 0 ? 0.016 : 0;
+      if (g.cinematicTimer <= 0) { g.cinematicMode = false; g.slowMo = 0; }
+    }
     const dragon = g.dragon; const keys = g.keys;
 
     // Day/night
@@ -616,10 +677,23 @@ export default function DragonGame() {
     if (keys.has('r') && g.stats.stamina > 15) { g.stats.stamina -= 15; g.camShake = 0.8; sound.roar(); g.enemies.forEach(e => { if (e.alive && e.mesh.position.distanceTo(dragon.position) < 35) e.stunned = 3; }); keys.delete('r'); }
 
     // Camera
-    const cd = 14, ch = 6;
-    const idealOff = new THREE.Vector3(dragon.position.x + Math.sin(g.yaw) * Math.cos(g.pitch * 0.3) * cd, dragon.position.y + ch + Math.sin(g.pitch * 0.3) * cd * 0.5, dragon.position.z + Math.cos(g.yaw) * Math.cos(g.pitch * 0.3) * cd);
-    const idealLook = new THREE.Vector3(dragon.position.x - Math.sin(g.yaw) * 10, dragon.position.y + 2, dragon.position.z - Math.cos(g.yaw) * 10);
-    g.camera.position.lerp(idealOff, 8 * dt); g.camera.lookAt(idealLook);
+    if (g.cinematicMode && g.cinematicTarget) {
+      const cTime = 3.0 - (g.cinematicTimer > 0 ? g.cinematicTimer : 0);
+      const cRadius = 25 - cTime * 3;
+      const cAngle = cTime * 1.5;
+      const cinematicPos = new THREE.Vector3(
+        g.cinematicTarget.x + Math.cos(cAngle) * cRadius,
+        g.cinematicTarget.y + 15 - cTime * 3,
+        g.cinematicTarget.z + Math.sin(cAngle) * cRadius
+      );
+      g.camera.position.lerp(cinematicPos, 4 * dt);
+      g.camera.lookAt(g.cinematicTarget.x, g.cinematicTarget.y + 5, g.cinematicTarget.z);
+    } else {
+      const cd = 14, ch = 6;
+      const idealOff = new THREE.Vector3(dragon.position.x + Math.sin(g.yaw) * Math.cos(g.pitch * 0.3) * cd, dragon.position.y + ch + Math.sin(g.pitch * 0.3) * cd * 0.5, dragon.position.z + Math.cos(g.yaw) * Math.cos(g.pitch * 0.3) * cd);
+      const idealLook = new THREE.Vector3(dragon.position.x - Math.sin(g.yaw) * 10, dragon.position.y + 2, dragon.position.z - Math.cos(g.yaw) * 10);
+      g.camera.position.lerp(idealOff, 8 * dt); g.camera.lookAt(idealLook);
+    }
     if (g.camShake > 0) { g.camera.position.x += (Math.random() - 0.5) * g.camShake; g.camera.position.y += (Math.random() - 0.5) * g.camShake; g.camShake *= 0.9; if (g.camShake < 0.01) g.camShake = 0; }
 
     // Enemies
@@ -715,8 +789,13 @@ export default function DragonGame() {
               g.stats.maxHealth += 15; g.stats.health = g.stats.maxHealth;
               g.stats.maxStamina += 10; g.stats.stamina = g.stats.maxStamina;
               g.stats.maxBreathFuel += 8; g.stats.breathFuel = g.stats.maxBreathFuel;
-              g.dragonScale = 1 + g.stats.level * 0.1; dragon.scale.setScalar(g.dragonScale * 2.3);
-              g.camShake = 0.5; sound.levelUp(); notify(`LEVEL UP! Level ${g.stats.level}!`);
+              // Dragon grows but does NOT shrink - only gets bigger
+              const newScale = g.baseScale * (1 + g.stats.level * 0.08);
+              if (newScale > g.dragonScale) {
+                g.dragonScale = newScale;
+                dragon.scale.setScalar(g.dragonScale);
+              }
+              g.camShake = 0.6; sound.levelUp(); notify(`LEVEL UP! Level ${g.stats.level}! Dragon grows stronger!`);
             }
 
             // Mission progress
@@ -750,7 +829,77 @@ export default function DragonGame() {
 
     // Dive landing
     if (g.isDiving && g.isGrounded) {
-      g.isDiving = false; g.diveVel.set(0, 0, 0); g.camShake = 1.5; sound.impact();
+      g.isDiving = false; g.diveVel.set(0, 0, 0); g.camShake = 2.0; sound.impact();
+
+      // Check for ship collision - CINEMATIC EXPLOSION
+      let hitShip: Enemy | null = null;
+      g.enemies.forEach(e => {
+        if (!e.alive || e.type !== 'ship') return;
+        if (e.mesh.position.distanceTo(dragon.position) < 20) hitShip = e;
+      });
+
+      if (hitShip) {
+        // CINEMATIC MODE: slow-mo, camera zoom, massive explosion
+        g.slowMo = 3.0; // 3 seconds of slow motion
+        g.cinematicMode = true;
+        g.cinematicTimer = 3.0;
+        g.cinematicTarget = hitShip.mesh.position.clone();
+        sound.cinematicBoom();
+        sound.shipExplosion();
+
+        // Massive explosion at ship position
+        const shipPos = hitShip.mesh.position.clone();
+        // Fire explosion
+        for (let i = 0; i < 80; i++) {
+          const sz = 1 + Math.random() * 2.5;
+          const pm = new THREE.Mesh(new THREE.SphereGeometry(sz, 6, 6),
+            new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(Math.random() * 0.12, 1, 0.4 + Math.random() * 0.5), transparent: true, opacity: 1.0 }));
+          pm.position.copy(shipPos); pm.position.y += 2;
+          const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 35;
+          g.scene.add(pm); g.particles.push({ mesh: pm, velocity: new THREE.Vector3(Math.cos(a) * s, 15 + Math.random() * 30, Math.sin(a) * s), lifetime: 1.0 + Math.random() * 1.0, maxLifetime: 2.0 });
+        }
+        // Ship debris - planks flying
+        for (let i = 0; i < 30; i++) {
+          const plank = new THREE.Mesh(
+            new THREE.BoxGeometry(0.3 + Math.random() * 2, 0.1 + Math.random() * 0.3, 0.5 + Math.random() * 3),
+            new THREE.MeshStandardMaterial({ color: new THREE.Color(0.2 + Math.random() * 0.3, 0.1 + Math.random() * 0.15, 0.02), roughness: 0.9 })
+          );
+          plank.position.copy(shipPos); plank.position.y += 3;
+          plank.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+          const a = Math.random() * Math.PI * 2, s = 8 + Math.random() * 20;
+          const vel = new THREE.Vector3(Math.cos(a) * s, 20 + Math.random() * 25, Math.sin(a) * s);
+          g.scene.add(plank); g.particles.push({ mesh: plank, velocity: vel, lifetime: 2 + Math.random() * 1, maxLifetime: 3.0 });
+        }
+        // Smoke column
+        for (let i = 0; i < 20; i++) {
+          const sm = new THREE.Mesh(new THREE.SphereGeometry(2 + Math.random() * 3, 6, 6),
+            new THREE.MeshBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.5 }));
+          sm.position.copy(shipPos); sm.position.y += 5 + Math.random() * 5;
+          g.scene.add(sm); g.particles.push({ mesh: sm, velocity: new THREE.Vector3((Math.random() - 0.5) * 3, 8 + Math.random() * 10, (Math.random() - 0.5) * 3), lifetime: 2 + Math.random() * 1, maxLifetime: 3.0 });
+        }
+        // Water geyser
+        for (let i = 0; i < 25; i++) {
+          const wm = new THREE.Mesh(new THREE.SphereGeometry(1.5 + Math.random() * 2, 4, 4), new THREE.MeshBasicMaterial({ color: 0x4488cc, transparent: true, opacity: 0.7 }));
+          wm.position.copy(shipPos); wm.position.y = WATER_Y;
+          const a = Math.random() * Math.PI * 2, s = 5 + Math.random() * 15;
+          g.scene.add(wm); g.particles.push({ mesh: wm, velocity: new THREE.Vector3(Math.cos(a) * s, 25 + Math.random() * 20, Math.sin(a) * s), lifetime: 1 + Math.random() * 0.5, maxLifetime: 1.5 });
+        }
+        // Explosion light flash
+        const expLight = new THREE.PointLight(0xff6600, 20, 80);
+        expLight.position.copy(shipPos); expLight.position.y += 5;
+        g.scene.add(expLight);
+        // Fade out explosion light
+        const fadeLight = () => { expLight.intensity *= 0.92; if (expLight.intensity > 0.1) requestAnimationFrame(fadeLight); else g.scene.remove(expLight); };
+        requestAnimationFrame(fadeLight);
+
+        // Destroy the ship
+        hitShip.health = 0; hitShip.alive = false; g.scene.remove(hitShip.mesh);
+        g.stats.xp += 50; g.stats.gold += 40;
+        createDmgNum(shipPos, 999);
+        notify('💥 SHIP DESTROYED!');
+      }
+
+      // Normal dive impact (water/ground)
       for (let i = 0; i < 35; i++) {
         const pm = new THREE.Mesh(new THREE.SphereGeometry(0.5 + Math.random() * 1, 4, 4),
           new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(0.06 + Math.random() * 0.06, 1, 0.5 + Math.random() * 0.4), transparent: true, opacity: 0.9 }));
@@ -758,21 +907,16 @@ export default function DragonGame() {
         const a = Math.random() * Math.PI * 2, s = 15 + Math.random() * 25;
         g.scene.add(pm); g.particles.push({ mesh: pm, velocity: new THREE.Vector3(Math.cos(a) * s, 10 + Math.random() * 20, Math.sin(a) * s), lifetime: 0.5 + Math.random() * 0.4, maxLifetime: 0.9 });
       }
-      for (let i = 0; i < 12; i++) {
-        const dm = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), new THREE.MeshStandardMaterial({ color: 0x666666 }));
-        dm.position.copy(dragon.position); dm.position.y += 1;
-        const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 15;
-        g.scene.add(dm); g.particles.push({ mesh: dm, velocity: new THREE.Vector3(Math.cos(a) * s, 15 + Math.random() * 15, Math.sin(a) * s), lifetime: 1 + Math.random() * 0.5, maxLifetime: 1.5 });
-      }
-      // Water splash - big blue particles
-      for (let i = 0; i < 15; i++) {
+      // Water splash
+      for (let i = 0; i < 20; i++) {
         const wm = new THREE.Mesh(new THREE.SphereGeometry(1 + Math.random(), 4, 4), new THREE.MeshBasicMaterial({ color: 0x4488cc, transparent: true, opacity: 0.6 }));
         wm.position.copy(dragon.position); wm.position.y = WATER_Y + 1;
         const a = Math.random() * Math.PI * 2, s = 8 + Math.random() * 12;
         g.scene.add(wm); g.particles.push({ mesh: wm, velocity: new THREE.Vector3(Math.cos(a) * s, 20 + Math.random() * 15, Math.sin(a) * s), lifetime: 0.8 + Math.random() * 0.3, maxLifetime: 1.1 });
       }
+      // Damage non-ship enemies
       g.enemies.forEach(e => {
-        if (!e.alive) return;
+        if (!e.alive || e.type === 'ship') return;
         const d = e.mesh.position.distanceTo(dragon.position);
         if (d < 28) {
           const dmg = 90 + g.stats.level * 10; e.health -= dmg;
@@ -860,7 +1004,9 @@ export default function DragonGame() {
     const loader = new GLTFLoader();
     loader.load('/models/demon_dragon.glb', (gltf) => {
       const model = gltf.scene;
-      model.scale.set(7.8, 7.8, 7.8); // 20% more than 6.5
+      model.scale.set(7.8, 7.8, 7.8); // Large dragon model
+      // Store GLB base scale so level-up won't shrink it
+      if (G.current) { G.current.baseScale = 7.8; G.current.dragonScale = 7.8; }
       model.position.copy(dragonObj.position); model.rotation.copy(dragonObj.rotation);
       model.traverse(c => { if (c instanceof THREE.Mesh) { c.castShadow = true; c.receiveShadow = true; } });
       const fl = new THREE.PointLight(0xff4400, 0, 35); fl.position.set(0, 2, -10); model.add(fl);
@@ -887,14 +1033,16 @@ export default function DragonGame() {
       isGrounded: true, isFlying: false, isBreathingFire: false, isDiving: false, isSprinting: false,
       diveVel: new THREE.Vector3(), dragonVel: new THREE.Vector3(), animId: 0, terrain: water,
       yaw: 0, pitch: 0, wingAngle: 0.3, wingDir: 1,
-      hungerT: 0, staminaT: 0, fireT: 0, notifT: 0, dragonScale: 1, active: true,
+      hungerT: 0, staminaT: 0, fireT: 0, notifT: 0, dragonScale: 2.3, active: true,
+      baseScale: 2.3,
+      slowMo: 0, cinematicMode: false, cinematicTimer: 0, cinematicTarget: null,
       dayTime: Math.PI / 3, sun, sunMesh, ambient, fog,
       fireLight, dragonModel: null, mixer: null,
       camShake: 0, killStreak: 0, comboT: 0, bloom,
       water, islands, ambientT: 0,
     };
     G.current = g;
-    setTimeout(() => setCurrentMission(missions[0]), 0);
+    setTimeout(() => { setCurrentMission(missions[0]); sound.startMusic(); }, 0);
 
     // Input
     const canvas = renderer.domElement;
@@ -921,7 +1069,7 @@ export default function DragonGame() {
     g.animId = requestAnimationFrame(() => loopRef.current());
 
     return () => {
-      g.active = false; cancelAnimationFrame(g.animId);
+      g.active = false; cancelAnimationFrame(g.animId); sound.stopMusic();
       if (document.pointerLockElement) document.exitPointerLock();
       canvas.removeEventListener('click', reqLock);
       document.removeEventListener('pointerlockchange', onPLC);
