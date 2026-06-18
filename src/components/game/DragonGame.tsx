@@ -388,6 +388,7 @@ export default function DragonGame() {
     fireLight.position.set(0, 1.5, -7.5); dragon.add(fireLight);
 
     dragon.position.set(0, 20, 0);
+    dragon.scale.set(1.9, 1.9, 1.9); // 90% bigger
     dragon.castShadow = true;
     scene.add(dragon);
     return dragon;
@@ -504,7 +505,7 @@ export default function DragonGame() {
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5, 0.35), woodMat);
       arm.position.set(0, 3, -0.5); arm.rotation.x = -0.5; group.add(arm);
       group.position.copy(position);
-      return { mesh: group, health: 100, speed: 0, attackCooldown: 3.5, attackRange: 150, damage: 30, aggroRange: 160 };
+      return { mesh: group, health: 70, speed: 0, attackCooldown: 4.5, attackRange: 130, damage: 18, aggroRange: 140 };
     }
     if (type === 'dragon' || type === 'boss') {
       const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8B0000, roughness: 0.45, metalness: 0.4 });
@@ -522,7 +523,7 @@ export default function DragonGame() {
       const fLight = new THREE.PointLight(0xff0000, 0, 20); fLight.position.set(0, 0.8, -5.5); group.add(fLight);
       group.position.copy(position);
       const isBoss = type === 'boss';
-      return { mesh: group, health: isBoss ? 500 : 150, speed: isBoss ? 14 : 10, attackCooldown: isBoss ? 1.2 : 2.2, attackRange: isBoss ? 70 : 55, damage: isBoss ? 28 : 15, aggroRange: isBoss ? 200 : 120 };
+      return { mesh: group, health: isBoss ? 300 : 100, speed: isBoss ? 12 : 9, attackCooldown: isBoss ? 2.0 : 3.0, attackRange: isBoss ? 60 : 45, damage: isBoss ? 18 : 10, aggroRange: isBoss ? 180 : 100 };
     }
     return { mesh: group, health: 50, speed: 3, attackCooldown: 2, attackRange: 50, damage: 10, aggroRange: 80 };
   }, []);
@@ -567,23 +568,71 @@ export default function DragonGame() {
 
   const breatheFire = useCallback(() => {
     const game = gameRef.current;
-    if (!game || game.stats.stamina < 3 || game.stats.breathFuel < 1) return;
-    game.stats.stamina -= 3; game.stats.breathFuel -= 2;
-    game.isBreathingFire = true; game.fireLight.intensity = 8;
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(game.dragon.quaternion);
-    const pos = game.dragon.position.clone().add(dir.clone().multiplyScalar(5));
-    pos.y += 1.5;
-    for (let i = 0; i < 8; i++) {
+    if (!game || game.stats.stamina < 2 || game.stats.breathFuel < 1) return;
+    game.stats.stamina -= 2; game.stats.breathFuel -= 1;
+    game.isBreathingFire = true; game.fireLight.intensity = 12;
+
+    // AUTO-AIM: Find closest alive enemy
+    let closestEnemy: Enemy | null = null;
+    let closestDist = Infinity;
+    game.enemies.forEach(e => {
+      if (!e.alive) return;
+      const d = e.mesh.position.distanceTo(game.dragon.position);
+      if (d < closestDist && d < 150) { closestDist = d; closestEnemy = e; }
+    });
+
+    // Direction: aim at closest enemy, otherwise forward
+    let fireDir: THREE.Vector3;
+    if (closestEnemy) {
+      fireDir = new THREE.Vector3().subVectors(closestEnemy.mesh.position, game.dragon.position).normalize();
+    } else {
+      fireDir = new THREE.Vector3(0, 0, -1).applyQuaternion(game.dragon.quaternion);
+    }
+
+    const pos = game.dragon.position.clone().add(fireDir.clone().multiplyScalar(6));
+    pos.y += 2;
+
+    // More particles, bigger, more dramatic
+    for (let i = 0; i < 12; i++) {
+      const size = 0.5 + Math.random() * 0.8;
       const fireMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3 + Math.random() * 0.5, 6, 6),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(0.04 + Math.random() * 0.08, 1, 0.5 + Math.random() * 0.4), transparent: true, opacity: 0.95 })
+        new THREE.SphereGeometry(size, 6, 6),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color().setHSL(
+            i < 4 ? 0.0 + Math.random() * 0.04 : 0.04 + Math.random() * 0.08,
+            1,
+            i < 4 ? 0.6 + Math.random() * 0.3 : 0.4 + Math.random() * 0.3
+          ),
+          transparent: true, opacity: 0.95
+        })
       );
       fireMesh.position.copy(pos);
-      const vel = dir.clone().multiplyScalar(40 + Math.random() * 25);
-      vel.x += (Math.random() - 0.5) * 12; vel.y += (Math.random() - 0.5) * 8; vel.z += (Math.random() - 0.5) * 12;
+      // Tighter spread when auto-aiming, wider when shooting forward
+      const spread = closestEnemy ? 0.15 : 0.3;
+      const speed = 50 + Math.random() * 30;
+      const vel = fireDir.clone().multiplyScalar(speed);
+      vel.x += (Math.random() - 0.5) * spread * speed;
+      vel.y += (Math.random() - 0.5) * spread * speed * 0.6;
+      vel.z += (Math.random() - 0.5) * spread * speed;
       game.scene.add(fireMesh);
-      game.fireParticles.push({ mesh: fireMesh, velocity: vel, lifetime: 0.6 + Math.random() * 0.5, maxLifetime: 1.1 });
+      game.fireParticles.push({ mesh: fireMesh, velocity: vel, lifetime: 0.5 + Math.random() * 0.4, maxLifetime: 0.9 });
     }
+
+    // Smoke trail particles
+    for (let i = 0; i < 4; i++) {
+      const smokeMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.8 + Math.random() * 0.5, 4, 4),
+        new THREE.MeshBasicMaterial({ color: 0x333333, transparent: true, opacity: 0.4 })
+      );
+      smokeMesh.position.copy(pos);
+      const vel = fireDir.clone().multiplyScalar(15 + Math.random() * 10);
+      vel.y += 3 + Math.random() * 3;
+      game.scene.add(smokeMesh);
+      game.fireParticles.push({ mesh: smokeMesh, velocity: vel, lifetime: 0.8 + Math.random() * 0.4, maxLifetime: 1.2 });
+    }
+
+    // Camera shake on fire
+    game.cameraShake = Math.max(game.cameraShake, 0.15);
   }, []);
 
   const enemyBreatheFire = useCallback((enemy: Enemy) => {
@@ -769,11 +818,24 @@ export default function DragonGame() {
     if (game.isBreathingFire) { game.fireBreathTimer += delta; if (game.fireBreathTimer > 0.08) { game.fireBreathTimer = 0; breatheFire(); } }
     if (!game.mouse.down) { game.isBreathingFire = false; game.fireLight.intensity *= 0.85; }
 
-    // Dive
-    if (game.mouse.rightDown && game.isFlying && !game.isDiving) {
+    // Dive (M key)
+    if (keys.has('m') && game.isFlying && !game.isDiving) {
       game.isDiving = true;
-      game.diveVelocity = flatForward.clone().multiplyScalar(40);
-      game.diveVelocity.y = -20;
+      game.diveVelocity = flatForward.clone().multiplyScalar(50);
+      game.diveVelocity.y = -30;
+      game.cameraShake = 0.3;
+      // Visual: burst of particles at dive start
+      for (let i = 0; i < 15; i++) {
+        const pMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.3 + Math.random() * 0.3, 4, 4),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(0.08, 1, 0.5 + Math.random() * 0.3), transparent: true, opacity: 0.8 })
+        );
+        pMesh.position.copy(dragon.position);
+        const vel = new THREE.Vector3((Math.random() - 0.5) * 20, Math.random() * 10 + 5, (Math.random() - 0.5) * 20);
+        game.scene.add(pMesh);
+        game.fireParticles.push({ mesh: pMesh, velocity: vel, lifetime: 0.5 + Math.random() * 0.3, maxLifetime: 0.8 });
+      }
+      keys.delete('m');
     }
 
     // Roar (R)
@@ -908,7 +970,7 @@ export default function DragonGame() {
               game.stats.maxHealth += 15; game.stats.health = game.stats.maxHealth;
               game.stats.maxStamina += 12; game.stats.stamina = game.stats.maxStamina;
               game.stats.maxBreathFuel += 10; game.stats.breathFuel = game.stats.maxBreathFuel;
-              game.dragonScale = 1 + game.stats.level * 0.08;
+              game.dragonScale = 1 + game.stats.level * 0.12;
               dragon.scale.setScalar(game.dragonScale);
               game.cameraShake = 0.5;
               showNotification(`LEVEL UP! Level ${game.stats.level}! Dragon grows!`);
@@ -949,14 +1011,41 @@ export default function DragonGame() {
       (dn.mesh.material as THREE.SpriteMaterial).opacity = dn.lifetime / 1.2; return true;
     });
 
-    // Dive landing
+    // Dive landing - massive impact
     if (game.isDiving && game.isGrounded) {
-      game.isDiving = false; game.diveVelocity.set(0, 0, 0); game.cameraShake = 1.0;
+      game.isDiving = false; game.diveVelocity.set(0, 0, 0); game.cameraShake = 1.5;
+      // Impact explosion particles
+      for (let i = 0; i < 30; i++) {
+        const pMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.5 + Math.random() * 1, 4, 4),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(0.06 + Math.random() * 0.06, 1, 0.5 + Math.random() * 0.4), transparent: true, opacity: 0.9 })
+        );
+        pMesh.position.copy(dragon.position); pMesh.position.y += 1;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 15 + Math.random() * 25;
+        const vel = new THREE.Vector3(Math.cos(angle) * speed, 10 + Math.random() * 20, Math.sin(angle) * speed);
+        game.scene.add(pMesh);
+        game.fireParticles.push({ mesh: pMesh, velocity: vel, lifetime: 0.6 + Math.random() * 0.5, maxLifetime: 1.1 });
+      }
+      // Rock/debris particles
+      for (let i = 0; i < 10; i++) {
+        const dMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.8 + Math.random() * 0.8, 0.8 + Math.random() * 0.8, 0.8 + Math.random() * 0.8),
+          new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 })
+        );
+        dMesh.position.copy(dragon.position); dMesh.position.y += 1;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 10 + Math.random() * 15;
+        const vel = new THREE.Vector3(Math.cos(angle) * speed, 15 + Math.random() * 15, Math.sin(angle) * speed);
+        game.scene.add(dMesh);
+        game.fireParticles.push({ mesh: dMesh, velocity: vel, lifetime: 1 + Math.random() * 0.5, maxLifetime: 1.5 });
+      }
+      // Damage enemies
       game.enemies.forEach(e => {
         if (!e.alive) return;
         const dist = e.mesh.position.distanceTo(dragon.position);
-        if (dist < 20) {
-          const dmg = 60 + game.stats.level * 5; e.health -= dmg;
+        if (dist < 25) {
+          const dmg = 80 + game.stats.level * 8; e.health -= dmg;
           createDamageNumber(e.mesh.position.clone(), dmg);
           if (e.health <= 0) { e.alive = false; game.scene.remove(e.mesh); game.stats.xp += 30; game.stats.gold += 20; }
         }
@@ -1056,7 +1145,7 @@ export default function DragonGame() {
     const loader = new GLTFLoader();
     loader.load('/models/demon_dragon.glb', (gltf) => {
       const model = gltf.scene;
-      model.scale.set(3.5, 3.5, 3.5); // SCALE UP the model significantly
+      model.scale.set(6.5, 6.5, 6.5); // Scaled up large
       model.position.copy(dragonObj.position); model.rotation.copy(dragonObj.rotation);
       model.traverse(c => { if (c instanceof THREE.Mesh) { c.castShadow = true; c.receiveShadow = true; } });
       const fl = new THREE.PointLight(0xff4400, 0, 30); fl.position.set(0, 2, -8); model.add(fl);
@@ -1095,7 +1184,7 @@ export default function DragonGame() {
     };
 
     gameRef.current = game;
-    setTimeout(() => { setMissionIndex(0); setCurrentMission(missions[0]); }, 0);
+    setTimeout(() => { setCurrentMission(missions[0]); }, 0);
 
     // ---- Input: Pointer Lock ----
     const canvas = renderer.domElement;
@@ -1195,7 +1284,7 @@ export default function DragonGame() {
             <button onClick={() => setGameState('playing')} className="px-14 py-5 bg-gradient-to-r from-red-900 to-red-700 hover:from-red-800 hover:to-red-600 text-amber-100 text-2xl font-black rounded-xl border-2 border-amber-500/40 shadow-2xl shadow-red-900/60 transition-all hover:scale-110 mb-8">BEGIN CONQUEST</button>
             <div className="mt-6 text-gray-500 text-xs space-y-1 max-w-lg mx-auto">
               <p>WASD — Move | Space — Fly Up | Shift — Fly Down | E — Sprint</p>
-              <p>Mouse — Look Around | Left Click — Fire Breath | Right Click — Dive</p>
+              <p>Mouse — Look Around | Left Click — Fire Breath (Auto-Aim) | M — Dive</p>
               <p>R — Roar Stun | Tab — Controls | Esc — Pause</p>
             </div>
           </div>
@@ -1287,7 +1376,7 @@ export default function DragonGame() {
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   {[['W', 'Forward'], ['S', 'Backward'], ['A', 'Strafe Left'], ['D', 'Strafe Right'],
                     ['Mouse', 'Look Around'], ['Space', 'Fly Up'], ['Shift', 'Fly Down'], ['E', 'Sprint'],
-                    ['LClick', 'Fire Breath'], ['RClick', 'Dive Attack'], ['R', 'Roar Stun'], ['Esc', 'Pause']].map(([k, d]) => (
+                    ['LClick', 'Fire Breath (Auto-Aim)'], ['M', 'Dive Attack'], ['R', 'Roar Stun'], ['Esc', 'Pause']].map(([k, d]) => (
                     <React.Fragment key={k}><div className="text-gray-400">{k}</div><div className="text-gray-200">{d}</div></React.Fragment>
                   ))}
                 </div>
